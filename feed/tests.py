@@ -108,3 +108,43 @@ class FeedTests(TestCase):
         self.client.logout(); self.client.login(username="editor", password="pw12345")
         self.assertEqual(self.client.get(reverse("region_new")).status_code, 200)          # can edit
         self.assertEqual(self.client.get(reverse("settings")).status_code, 403)            # still can't admin
+
+    def test_empty_rep_and_client_dropdowns_explain_themselves(self):
+        # As admin, with no "rep" or "client" role users created yet, the customer form's
+        # rep/user <select> fields are legitimately empty (see CustomerForm) — but the page
+        # must explain why and link straight to creating one, instead of silently doing nothing.
+        resp = self.client.get(reverse("customer_new"))
+        self.assertContains(resp, "لا يوجد أي مستخدم بصلاحية «مندوب» بعد")
+        self.assertContains(resp, "لا يوجد أي مستخدم بصلاحية «عميل» بعد")
+        self.assertContains(resp, reverse("user_new"))
+        self.assertContains(resp, "role=rep")
+
+    def test_client_dropdown_explains_when_all_are_already_linked(self):
+        cu = User.objects.create_user("client2", password="pw12345")
+        Profile.objects.create(user=cu, role=Profile.ROLE_CLIENT)
+        Customer.objects.create(region=self.r, name="عميل آخر", user=cu)
+        resp = self.client.get(reverse("customer_new"))
+        self.assertContains(resp, "كل حسابات «عميل» الموجودة مرتبطة بعملاء آخرين بالفعل")
+
+    def test_create_rep_user_from_customer_form_returns_to_it(self):
+        # Follow the exact flow the hint link offers: admin is on the "new customer" page,
+        # clicks through to create the missing rep account, and lands back where they started.
+        next_url = reverse("customer_new")
+        create_url = reverse("user_new") + f"?role=rep&next={next_url}"
+        get_resp = self.client.get(create_url)
+        self.assertEqual(get_resp.context["form"].initial.get("role"), "rep")
+        post_resp = self.client.post(create_url, {
+            "username": "rep2", "password": "pw12345", "is_active": "on", "role": "rep", "next": next_url,
+        })
+        self.assertRedirects(post_resp, next_url)
+        new_user = User.objects.get(username="rep2")
+        self.assertEqual(new_user.profile.role, Profile.ROLE_REP)
+        # Back on the customer form, the newly created rep now shows up in the dropdown.
+        self.assertContains(self.client.get(next_url), "rep2")
+
+    def test_next_redirect_rejects_external_urls(self):
+        post_resp = self.client.post(reverse("user_new"), {
+            "username": "rep3", "password": "pw12345", "is_active": "on", "role": "rep",
+            "next": "https://evil.example/steal",
+        })
+        self.assertRedirects(post_resp, reverse("users"))

@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.utils.http import url_has_allowed_host_and_scheme
 from .forms import CustomerForm, CustomerImportForm, RegionForm, SettingsForm, TransactionForm, UserForm
 from .models import AppSettings, Customer, FeedTransaction, Profile, Region, get_role, visible_customers
 from .permissions import can_admin, can_edit, can_edit_own
@@ -122,7 +123,8 @@ def customer_form(request, pk=None):
     def attach(o):
         if role == Profile.ROLE_REP and not o.rep_id:
             o.rep = request.user  # a rep's new customers are automatically their own
-    return _form(request, lambda *a, **kw: CustomerForm(*a, allow_assign=(role in (Profile.ROLE_EDIT, Profile.ROLE_ADMIN)), **kw),
+    return _form(request, lambda *a, **kw: CustomerForm(*a, allow_assign=(role in (Profile.ROLE_EDIT, Profile.ROLE_ADMIN)),
+                                                          next_url=request.get_full_path(), **kw),
                  "تعديل العميل" if obj else "عميل جديد", nxt, instance=obj, initial=initial, on_save=attach)
 
 
@@ -296,11 +298,25 @@ def users_view(request):
     return render(request, "feed/users.html", {"rows": User.objects.select_related("profile").all().order_by("username")})
 
 
+def _safe_next(request, raw):
+    """Only ever redirect to a path of this same site (never an attacker-supplied external URL)."""
+    if raw and url_has_allowed_host_and_scheme(raw, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return raw
+    return None
+
+
 @login_required
 @can_admin
 def user_form(request, pk=None):
     obj = get_object_or_404(User, pk=pk) if pk else None
-    form = UserForm(request.POST or None, instance=obj)
+    # Coming here from "no rep/client accounts yet" links on the customer form: preselect the
+    # role that was missing, and remember where to send the admin back to once this is saved.
+    next_url = _safe_next(request, request.POST.get("next") or request.GET.get("next"))
+    initial = None
+    if not obj and request.GET.get("role") in dict(Profile.ROLES):
+        initial = {"role": request.GET["role"]}
+    form = UserForm(request.POST or None, instance=obj, initial=initial)
+    cancel = next_url or reverse("users")
     if request.method == "POST" and form.is_valid():
         user = form.save(commit=False)
         pw = form.cleaned_data.get("password")
@@ -308,14 +324,15 @@ def user_form(request, pk=None):
             user.set_password(pw)
         elif not obj:
             messages.error(request, "اكتب كلمة مرور للمستخدم الجديد")
-            return render(request, "feed/form.html", {"form": form, "title": "مستخدم جديد", "cancel": reverse("users")})
+            return render(request, "feed/form.html", {"form": form, "title": "مستخدم جديد", "cancel": cancel, "next_url": next_url})
         role = form.cleaned_data["role"]
         user.is_staff = (role == Profile.ROLE_ADMIN)  # also grants/revokes access to Django's own /admin/
         user.save()
         Profile.objects.update_or_create(user=user, defaults={"role": role})
         messages.success(request, "تم الحفظ")
-        return redirect("users")
-    return render(request, "feed/form.html", {"form": form, "title": "تعديل مستخدم" if obj else "مستخدم جديد", "cancel": reverse("users")})
+        return redirect(next_url or "users")
+    return render(request, "feed/form.html", {"form": form, "title": "تعديل مستخدم" if obj else "مستخدم جديد",
+                                               "cancel": cancel, "next_url": next_url})
 
 
 @login_required

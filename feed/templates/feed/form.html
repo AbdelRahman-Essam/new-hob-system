@@ -1,5 +1,6 @@
 {% extends "feed/base.html" %}
 {% block content %}<h2>{{ title }}</h2>
 <form method="post" class="card">{% csrf_token %}{{ form.non_field_errors }}
-{% for f in form %}<label for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% for e in f.errors %}<div class="err">{{ e }}</div>{% endfor %}{% endfor %}
+{% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+{% for f in form %}<label for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% if f.help_text %}<div class="hint">{{ f.help_text }}</div>{% endif %}{% for e in f.errors %}<div class="err">{{ e }}</div>{% endfor %}{% endfor %}
 <div class="row"><button class="btn" type="submit">حفظ</button><a class="btn sec" href="{{ cancel }}">إلغاء</a></div></form>{% endblock %}
