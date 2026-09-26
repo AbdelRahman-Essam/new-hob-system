@@ -1,16 +1,22 @@
 from django import forms
 from django.contrib.auth.models import User
-from .models import AppSettings, Customer, FeedTransaction, Region
+from .models import AppSettings, Customer, FeedTransaction, Profile, Region
 
 
 class UserForm(forms.ModelForm):
     password = forms.CharField(label="كلمة المرور (اتركها فارغة للإبقاء عليها عند التعديل)", required=False,
                                 widget=forms.PasswordInput(render_value=False))
+    role = forms.ChoiceField(label="الصلاحية", choices=Profile.ROLES, initial=Profile.ROLE_VIEW)
 
     class Meta:
         model = User
-        fields = ["username", "is_staff", "is_active"]
-        labels = {"username": "اسم المستخدم", "is_staff": "مدير (صلاحية كاملة)", "is_active": "الحساب مفعّل"}
+        fields = ["username", "is_active"]
+        labels = {"username": "اسم المستخدم", "is_active": "الحساب مفعّل"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            self.fields["role"].initial = getattr(self.instance, "profile", None) and self.instance.profile.role
 
 
 class RegionForm(forms.ModelForm):
@@ -24,6 +30,12 @@ class CustomerForm(forms.ModelForm):
         model = Customer
         fields = ["region", "name", "phone", "farm_name", "address", "notes"]
         widgets = {"notes": forms.Textarea(attrs={"rows": 2}), "phone": forms.TextInput(attrs={"inputmode": "tel"})}
+
+
+class CustomerImportForm(forms.Form):
+    file = forms.FileField(label="ملف CSV")
+    default_region = forms.ModelChoiceField(label="الشريحة الافتراضية (تُستخدم إن لم يحدد الملف شريحة للسطر)",
+                                             queryset=Region.objects.all(), required=False)
 
 
 class TransactionForm(forms.ModelForm):

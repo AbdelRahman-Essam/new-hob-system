@@ -6,7 +6,7 @@
 <body class="{% if app.dark_mode %}dark{% endif %}">
 {% with n=request.resolver_match.url_name %}
 <main id="app">
-<div class="topbar"><span>👤 {{ request.user.username }}{% if request.user.is_staff %} (مدير){% endif %}</span><a href="{% url 'logout' %}">تسجيل الخروج</a></div>
+<div class="topbar"><span>👤 {{ request.user.username }}{% if role == "admin" %} (مدير){% elif role == "edit" %} (تعديل){% elif role == "view" %} (مشاهدة){% endif %}</span><a href="{% url 'logout' %}">تسجيل الخروج</a></div>
 {% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}
 {% block content %}{% endblock %}
 </main>
@@ -15,7 +15,7 @@
 <a href="{% url 'regions' %}" class="{% if 'region' in n %}on{% endif %}"><i>🗂️</i>الشرائح</a>
 <a href="{% url 'customers' %}" class="{% if 'customer' in n or 'tx' in n %}on{% endif %}"><i>👥</i>العملاء</a>
 <a href="{% url 'report' %}" class="{% if n == 'report' %}on{% endif %}"><i>📊</i>التقارير</a>
-{% if request.user.is_staff %}<a href="{% url 'settings' %}" class="{% if n == 'settings' or n == 'users' or n == 'user_new' or n == 'user_edit' %}on{% endif %}"><i>⚙️</i>الإعدادات</a>{% endif %}
+{% if can_admin %}<a href="{% url 'settings' %}" class="{% if n == 'settings' or n == 'users' or n == 'user_new' or n == 'user_edit' %}on{% endif %}"><i>⚙️</i>الإعدادات</a>{% endif %}
 </nav>{% endwith %}
 {% block scripts %}{% endblock %}
 </body></html>

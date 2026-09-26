@@ -1,0 +1,10 @@
+{% extends "feed/base.html" %}
+{% block content %}<h2>استيراد عملاء من ملف CSV</h2>
+<div class="cd"><div class="m">أعمدة الملف المتوقعة (بالإنجليزية أو العربية): <b>name/الاسم</b> (إلزامي)، phone/الهاتف، farm_name/المزرعة، address/العنوان، notes/ملاحظات، region/الشريحة (اختياري إن اخترت شريحة افتراضية بالأسفل).<br>
+أول سطر في الملف يجب أن يكون أسماء الأعمدة.</div></div>
+<form method="post" enctype="multipart/form-data" class="card">{% csrf_token %}{{ form.non_field_errors }}
+{% for f in form %}<label for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% for e in f.errors %}<div class="err">{{ e }}</div>{% endfor %}{% endfor %}
+<div class="row"><button class="btn" type="submit">استيراد</button><a class="btn sec" href="{% url 'customers' %}">إلغاء</a></div></form>
+{% if created %}<div class="cd"><div class="t">تمت الإضافة ({{ created|length }})</div><div class="m">{{ created|join:"، " }}</div></div>{% endif %}
+{% if errors %}<div class="cd due"><div class="t">أسطر تم تجاهلها</div><div class="m">{% for e in errors %}{{ e }}<br>{% endfor %}</div></div>{% endif %}
+{% endblock %}

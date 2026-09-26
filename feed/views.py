@@ -1,19 +1,22 @@
 import csv
+import io
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core import serializers
 from django.db import transaction
 from django.db.models import Q, Sum
-from django.http import HttpResponse, HttpResponseForbidden
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from .forms import CustomerForm, RegionForm, SettingsForm, TransactionForm, UserForm
-from .models import AppSettings, Customer, FeedTransaction, Region
+from .forms import CustomerForm, CustomerImportForm, RegionForm, SettingsForm, TransactionForm, UserForm
+from .models import AppSettings, Customer, FeedTransaction, Profile, Region
+from .permissions import can_admin, can_edit
 
-is_admin = user_passes_test(lambda u: u.is_staff)
+DUE_GRACE = 40  # "no recent delivery" = overdue by more than 40 days, or never delivered
+FILTERS = [("all", "الكل"), ("soon", "مستحق قريبًا"), ("due", "مستحق اليوم"), ("late", "متأخر"), ("none", "لا توجد نقلة حديثة")]
 
 
 def _form(request, form_class, title, next_url, instance=None, initial=None, on_save=None):
@@ -33,7 +36,7 @@ def dashboard(request):
     cfg = AppSettings.get()
     groups = {"soon": [], "due": [], "late": []}
     alerts = []
-    for c in Customer.objects.select_related("region"):
+    for c in Customer.objects.select_related("region").with_last_tx():
         t = c.last_tx
         if not t:
             continue
@@ -59,7 +62,7 @@ def dashboard(request):
 def regions(request):
     rows = []
     for r in Region.objects.all():
-        cs = list(r.customers.all())
+        cs = r.customers.with_last_tx()
         qty = FeedTransaction.objects.filter(customer__region=r).aggregate(q=Sum("quantity"))["q"] or 0
         need = sum(1 for c in cs if c.last_tx and c.last_tx.status != "ok")
         rows.append({"r": r, "n": len(cs), "qty": qty, "need": need})
@@ -67,12 +70,10 @@ def regions(request):
 
 
 @login_required
+@can_edit
 def region_form(request, pk=None):
     obj = get_object_or_404(Region, pk=pk) if pk else None
     return _form(request, RegionForm, "تعديل الشريحة" if obj else "شريحة جديدة", reverse("regions"), instance=obj)
-
-
-FILTERS = [("all", "الكل"), ("soon", "مستحق قريبًا"), ("due", "مستحق اليوم"), ("late", "متأخر"), ("none", "لا توجد نقلة حديثة")]
 
 
 @login_required
@@ -84,7 +85,7 @@ def customers(request):
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(farm_name__icontains=q) | Q(phone__icontains=q) | Q(region__name__icontains=q))
     rows = []
-    for c in qs:
+    for c in qs.with_last_tx():
         t = c.last_tx
         if f == "none" and t and t.days_left >= -DUE_GRACE:
             continue
@@ -96,10 +97,8 @@ def customers(request):
     return render(request, "feed/customers.html", {"rows": rows, "q": q, "f": f, "filters": FILTERS, "region": region})
 
 
-DUE_GRACE = 40  # "no recent delivery" = overdue by more than 40 days, or never delivered
-
-
 @login_required
+@can_edit
 def customer_form(request, pk=None):
     obj = get_object_or_404(Customer, pk=pk) if pk else None
     if not obj and not Region.objects.exists():
@@ -111,12 +110,54 @@ def customer_form(request, pk=None):
 
 
 @login_required
+@can_edit
+def customer_import(request):
+    """Bulk-add members/customers from a CSV file (columns: name, phone, farm_name, address,
+    notes, region — region column optional if a default region is chosen below)."""
+    form = CustomerImportForm(request.POST or None, request.FILES or None)
+    created = errors = []
+    if request.method == "POST" and form.is_valid():
+        created, errors = [], []
+        default_region = form.cleaned_data["default_region"]
+        raw = form.cleaned_data["file"].read().decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(raw))
+        with transaction.atomic():
+            for i, row in enumerate(reader, start=2):  # row 1 is the header
+                row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+                name = row.get("name") or row.get("الاسم")
+                if not name:
+                    errors.append(f"سطر {i}: بلا اسم — تم تجاهله")
+                    continue
+                region_name = row.get("region") or row.get("الشريحة")
+                region = Region.objects.filter(name__iexact=region_name).first() if region_name else default_region
+                if not region:
+                    errors.append(f"سطر {i} ({name}): لا توجد شريحة محددة أو مطابقة — تم تجاهله")
+                    continue
+                Customer.objects.create(
+                    region=region, name=name,
+                    phone=row.get("phone") or row.get("الهاتف") or "",
+                    farm_name=row.get("farm_name") or row.get("المزرعة") or "",
+                    address=row.get("address") or row.get("العنوان") or "",
+                    notes=row.get("notes") or row.get("ملاحظات") or "",
+                )
+                created.append(name)
+        if created:
+            messages.success(request, f"تمت إضافة {len(created)} عميل بنجاح")
+        if errors:
+            messages.error(request, " | ".join(errors))
+        if created and not errors:
+            return redirect("customers")
+    return render(request, "feed/customer_import.html", {"form": form, "created": created, "errors": errors})
+
+
+@login_required
 def customer_detail(request, pk):
     c = get_object_or_404(Customer.objects.select_related("region"), pk=pk)
     return render(request, "feed/customer_detail.html", {"c": c, "history": list(c.transactions.all()), "t": c.last_tx})
 
 
 @login_required
+@can_edit
 def tx_form(request, cpk=None, pk=None):
     obj = get_object_or_404(FeedTransaction, pk=pk) if pk else None
     customer = obj.customer if obj else get_object_or_404(Customer, pk=cpk)
@@ -128,6 +169,7 @@ def tx_form(request, cpk=None, pk=None):
 
 
 @login_required
+@can_edit
 def delete(request, kind, pk):
     model = {"region": Region, "customer": Customer, "tx": FeedTransaction}.get(kind)
     if not model:
@@ -171,7 +213,7 @@ def report(request):
         x = by.setdefault(t.customer.region.name, [0, 0, 0])
         x[0] += 1; x[1] += t.quantity; x[2] += t.total_price
     due = late = 0
-    for c in Customer.objects.all():
+    for c in Customer.objects.with_last_tx():
         t = c.last_tx
         due += bool(t and t.status == "due"); late += bool(t and t.status == "late")
     return render(request, "feed/report.html", {
@@ -182,7 +224,7 @@ def report(request):
 
 
 @login_required
-@is_admin
+@can_admin
 def settings_view(request):
     form = SettingsForm(request.POST or None, instance=AppSettings.get())
     if request.method == "POST" and form.is_valid():
@@ -193,7 +235,7 @@ def settings_view(request):
 
 
 @login_required
-@is_admin
+@can_admin
 def backup(request):
     data = serializers.serialize("json", [*Region.objects.all(), *Customer.objects.all(), *FeedTransaction.objects.all(), *AppSettings.objects.all()])
     resp = HttpResponse(data, content_type="application/json; charset=utf-8")
@@ -202,7 +244,7 @@ def backup(request):
 
 
 @login_required
-@is_admin
+@can_admin
 def restore(request):
     f = request.FILES.get("file")
     if request.method == "POST" and f:
@@ -220,13 +262,13 @@ def restore(request):
 
 
 @login_required
-@is_admin
+@can_admin
 def users_view(request):
-    return render(request, "feed/users.html", {"rows": User.objects.all().order_by("username")})
+    return render(request, "feed/users.html", {"rows": User.objects.select_related("profile").all().order_by("username")})
 
 
 @login_required
-@is_admin
+@can_admin
 def user_form(request, pk=None):
     obj = get_object_or_404(User, pk=pk) if pk else None
     form = UserForm(request.POST or None, instance=obj)
@@ -238,14 +280,17 @@ def user_form(request, pk=None):
         elif not obj:
             messages.error(request, "اكتب كلمة مرور للمستخدم الجديد")
             return render(request, "feed/form.html", {"form": form, "title": "مستخدم جديد", "cancel": reverse("users")})
+        role = form.cleaned_data["role"]
+        user.is_staff = (role == Profile.ROLE_ADMIN)  # also grants/revokes access to Django's own /admin/
         user.save()
+        Profile.objects.update_or_create(user=user, defaults={"role": role})
         messages.success(request, "تم الحفظ")
         return redirect("users")
     return render(request, "feed/form.html", {"form": form, "title": "تعديل مستخدم" if obj else "مستخدم جديد", "cancel": reverse("users")})
 
 
 @login_required
-@is_admin
+@can_admin
 def user_delete(request, pk):
     obj = get_object_or_404(User, pk=pk)
     if obj == request.user:

@@ -14,6 +14,7 @@ urlpatterns = [
     path("regions/<int:pk>/edit/", v.region_form, name="region_edit"),
     path("customers/", v.customers, name="customers"),
     path("customers/new/", v.customer_form, name="customer_new"),
+    path("customers/import/", v.customer_import, name="customer_import"),
     path("customers/<int:pk>/", v.customer_detail, name="customer_detail"),
     path("customers/<int:pk>/edit/", v.customer_form, name="customer_edit"),
     path("customers/<int:cpk>/tx/new/", v.tx_form, name="tx_new"),

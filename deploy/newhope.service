@@ -1,0 +1,18 @@
+[Unit]
+Description=New Hope Feed Manager (Gunicorn)
+After=network.target
+
+[Service]
+# Change these two paths/user if you deploy to a different location or run as a different user.
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/newhope
+EnvironmentFile=/etc/newhope.env
+ExecStart=/var/www/newhope/venv/bin/gunicorn \
+    --workers 3 \
+    --bind unix:/run/newhope.sock \
+    config.wsgi:application
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
