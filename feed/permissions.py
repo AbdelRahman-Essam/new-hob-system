@@ -26,5 +26,7 @@ def _require_role(allowed):
     return decorator
 
 
-can_edit = _require_role({"edit", "admin"})
+can_edit = _require_role({"edit", "admin"})            # regions, and anything administrative
+can_edit_own = _require_role({"edit", "rep", "admin"})  # customers/transactions — reps are scoped
+                                                         # to their own assigned customers inside the view itself
 can_admin = _require_role({"admin"})

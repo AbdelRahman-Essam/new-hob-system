@@ -28,8 +28,23 @@ class RegionForm(forms.ModelForm):
 class CustomerForm(forms.ModelForm):
     class Meta:
         model = Customer
-        fields = ["region", "name", "phone", "farm_name", "address", "notes"]
+        fields = ["region", "name", "phone", "farm_name", "address", "notes", "rep", "user"]
+        labels = {"rep": "المندوب المسؤول", "user": "حساب دخول العميل (اختياري)"}
         widgets = {"notes": forms.Textarea(attrs={"rows": 2}), "phone": forms.TextInput(attrs={"inputmode": "tel"})}
+
+    def __init__(self, *args, allow_assign=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not allow_assign:
+            # Only an admin reassigns who a customer belongs to (their rep) or which login
+            # account can see them (their client user) — everyone else edits the rest as usual.
+            del self.fields["rep"]
+            del self.fields["user"]
+        else:
+            self.fields["rep"].required = False
+            self.fields["rep"].queryset = User.objects.filter(profile__role=Profile.ROLE_REP)
+            self.fields["user"].required = False
+            linked_elsewhere = Customer.objects.exclude(pk=self.instance.pk if self.instance else None).values_list("user_id", flat=True)
+            self.fields["user"].queryset = User.objects.filter(profile__role=Profile.ROLE_CLIENT).exclude(pk__in=linked_elsewhere)
 
 
 class CustomerImportForm(forms.Form):

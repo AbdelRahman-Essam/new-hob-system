@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core import serializers
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q, Sum
 from django.http import HttpResponse
@@ -12,8 +13,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from .forms import CustomerForm, CustomerImportForm, RegionForm, SettingsForm, TransactionForm, UserForm
-from .models import AppSettings, Customer, FeedTransaction, Profile, Region
-from .permissions import can_admin, can_edit
+from .models import AppSettings, Customer, FeedTransaction, Profile, Region, get_role, visible_customers
+from .permissions import can_admin, can_edit, can_edit_own
 
 DUE_GRACE = 40  # "no recent delivery" = overdue by more than 40 days, or never delivered
 FILTERS = [("all", "الكل"), ("soon", "مستحق قريبًا"), ("due", "مستحق اليوم"), ("late", "متأخر"), ("none", "لا توجد نقلة حديثة")]
@@ -33,10 +34,16 @@ def _form(request, form_class, title, next_url, instance=None, initial=None, on_
 
 @login_required
 def dashboard(request):
+    if get_role(request.user) == Profile.ROLE_CLIENT:
+        c = visible_customers(request.user).select_related("region").first()
+        if not c:
+            return render(request, "feed/dashboard.html", {"no_client_link": True})
+        return render(request, "feed/customer_detail.html", {"c": c, "history": list(c.transactions.all()), "t": c.last_tx})
     cfg = AppSettings.get()
     groups = {"soon": [], "due": [], "late": []}
     alerts = []
-    for c in Customer.objects.select_related("region").with_last_tx():
+    my_customers = visible_customers(request.user).select_related("region").with_last_tx()
+    for c in my_customers:
         t = c.last_tx
         if not t:
             continue
@@ -52,18 +59,22 @@ def dashboard(request):
                 alerts.append({"title": "موعد سحب علف قريب", "body": f"العميل: {who}\nمتبقي {d} يوم على مرور 40 يومًا من آخر نقلة."})
     for g in groups.values():
         g.sort(key=lambda x: x["t"].days_left)
-    agg = FeedTransaction.objects.aggregate(q=Sum("quantity"), v=Sum("total_price"))
+    ids = [c.pk for c in my_customers]
+    agg = FeedTransaction.objects.filter(customer_id__in=ids).aggregate(q=Sum("quantity"), v=Sum("total_price"))
     return render(request, "feed/dashboard.html", {
-        "groups": groups, "alerts": alerts, "n_customers": Customer.objects.count(), "n_regions": Region.objects.count(),
+        "groups": groups, "alerts": alerts, "n_customers": len(ids), "n_regions": Region.objects.count(),
         "total_qty": agg["q"] or 0, "total_value": agg["v"] or 0})
 
 
 @login_required
 def regions(request):
+    my_customers = visible_customers(request.user)
     rows = []
     for r in Region.objects.all():
-        cs = r.customers.with_last_tx()
-        qty = FeedTransaction.objects.filter(customer__region=r).aggregate(q=Sum("quantity"))["q"] or 0
+        cs = my_customers.filter(region=r).with_last_tx()
+        if not cs and get_role(request.user) in (Profile.ROLE_REP, Profile.ROLE_CLIENT):
+            continue  # hide regions with none of *my* customers for scoped roles
+        qty = FeedTransaction.objects.filter(customer__in=cs).aggregate(q=Sum("quantity"))["q"] or 0
         need = sum(1 for c in cs if c.last_tx and c.last_tx.status != "ok")
         rows.append({"r": r, "n": len(cs), "qty": qty, "need": need})
     return render(request, "feed/regions.html", {"rows": rows})
@@ -79,7 +90,7 @@ def region_form(request, pk=None):
 @login_required
 def customers(request):
     q, f, r = request.GET.get("q", "").strip(), request.GET.get("f", "all"), request.GET.get("r", "")
-    qs = Customer.objects.select_related("region")
+    qs = visible_customers(request.user).select_related("region")
     if r.isdigit():
         qs = qs.filter(region_id=r)
     if q:
@@ -98,24 +109,32 @@ def customers(request):
 
 
 @login_required
-@can_edit
+@can_edit_own
 def customer_form(request, pk=None):
-    obj = get_object_or_404(Customer, pk=pk) if pk else None
+    obj = get_object_or_404(visible_customers(request.user), pk=pk) if pk else None
     if not obj and not Region.objects.exists():
         messages.error(request, "أضف شريحة أولًا")
         return redirect("region_new")
     initial = {"region": request.GET.get("r")} if request.GET.get("r") else None
     nxt = reverse("customer_detail", args=[pk]) if pk else reverse("customers")
-    return _form(request, CustomerForm, "تعديل العميل" if obj else "عميل جديد", nxt, instance=obj, initial=initial)
+    role = get_role(request.user)
+
+    def attach(o):
+        if role == Profile.ROLE_REP and not o.rep_id:
+            o.rep = request.user  # a rep's new customers are automatically their own
+    return _form(request, lambda *a, **kw: CustomerForm(*a, allow_assign=(role in (Profile.ROLE_EDIT, Profile.ROLE_ADMIN)), **kw),
+                 "تعديل العميل" if obj else "عميل جديد", nxt, instance=obj, initial=initial, on_save=attach)
 
 
 @login_required
-@can_edit
+@can_edit_own
 def customer_import(request):
     """Bulk-add members/customers from a CSV file (columns: name, phone, farm_name, address,
-    notes, region — region column optional if a default region is chosen below)."""
+    notes, region — region column optional if a default region is chosen below). A rep's
+    imported customers are automatically assigned to them, same as customer_form."""
     form = CustomerImportForm(request.POST or None, request.FILES or None)
     created = errors = []
+    my_role = get_role(request.user)
     if request.method == "POST" and form.is_valid():
         created, errors = [], []
         default_region = form.cleaned_data["default_region"]
@@ -139,6 +158,7 @@ def customer_import(request):
                     farm_name=row.get("farm_name") or row.get("المزرعة") or "",
                     address=row.get("address") or row.get("العنوان") or "",
                     notes=row.get("notes") or row.get("ملاحظات") or "",
+                    rep=request.user if my_role == Profile.ROLE_REP else None,
                 )
                 created.append(name)
         if created:
@@ -152,15 +172,15 @@ def customer_import(request):
 
 @login_required
 def customer_detail(request, pk):
-    c = get_object_or_404(Customer.objects.select_related("region"), pk=pk)
+    c = get_object_or_404(visible_customers(request.user).select_related("region"), pk=pk)
     return render(request, "feed/customer_detail.html", {"c": c, "history": list(c.transactions.all()), "t": c.last_tx})
 
 
 @login_required
-@can_edit
+@can_edit_own
 def tx_form(request, cpk=None, pk=None):
-    obj = get_object_or_404(FeedTransaction, pk=pk) if pk else None
-    customer = obj.customer if obj else get_object_or_404(Customer, pk=cpk)
+    obj = get_object_or_404(FeedTransaction.objects.filter(customer__in=visible_customers(request.user)), pk=pk) if pk else None
+    customer = obj.customer if obj else get_object_or_404(visible_customers(request.user), pk=cpk)
 
     def attach(o):
         o.customer = customer
@@ -169,12 +189,20 @@ def tx_form(request, cpk=None, pk=None):
 
 
 @login_required
-@can_edit
 def delete(request, kind, pk):
     model = {"region": Region, "customer": Customer, "tx": FeedTransaction}.get(kind)
     if not model:
         return redirect("dashboard")
-    obj = get_object_or_404(model, pk=pk)
+    role = get_role(request.user)
+    if kind == "region":
+        if role not in ("edit", "admin"):
+            raise PermissionDenied("صلاحيتك الحالية لا تسمح بهذا الإجراء")
+        obj = get_object_or_404(Region, pk=pk)
+    else:
+        if role not in ("edit", "rep", "admin"):
+            raise PermissionDenied("صلاحيتك الحالية لا تسمح بهذا الإجراء")
+        scope = visible_customers(request.user)
+        obj = get_object_or_404(model.objects.filter(**({"pk__in": scope} if kind == "customer" else {"customer__in": scope})), pk=pk)
     back = reverse({"region": "regions", "customer": "customers"}[kind]) if kind != "tx" else reverse("customer_detail", args=[obj.customer_id])
     if request.method == "POST":
         obj.delete()
@@ -187,7 +215,8 @@ def delete(request, kind, pk):
 @login_required
 def report(request):
     g = request.GET
-    qs = FeedTransaction.objects.select_related("customer__region").order_by("-date")
+    my_customers = visible_customers(request.user)
+    qs = FeedTransaction.objects.filter(customer__in=my_customers).select_related("customer__region").order_by("-date")
     if g.get("r", "").isdigit():
         qs = qs.filter(customer__region_id=g["r"])
     if g.get("c", "").isdigit():
@@ -213,13 +242,13 @@ def report(request):
         x = by.setdefault(t.customer.region.name, [0, 0, 0])
         x[0] += 1; x[1] += t.quantity; x[2] += t.total_price
     due = late = 0
-    for c in Customer.objects.with_last_tx():
+    for c in my_customers.with_last_tx():
         t = c.last_tx
         due += bool(t and t.status == "due"); late += bool(t and t.status == "late")
     return render(request, "feed/report.html", {
         "rows": rows, "by_region": by.items(), "n": len(rows), "qty": sum(t.quantity for t in rows),
         "value": sum(t.total_price for t in rows), "due": due, "late": late, "g": g,
-        "regions": Region.objects.all(), "customers": Customer.objects.filter(region_id=g["r"]) if g.get("r", "").isdigit() else Customer.objects.all(),
+        "regions": Region.objects.all(), "customers": my_customers.filter(region_id=g["r"]) if g.get("r", "").isdigit() else my_customers,
         "today": timezone.localdate()})
 
 

@@ -60,7 +60,37 @@ class FeedTests(TestCase):
         self.assertEqual(by_pk[self.c.pk].last_tx, newest)
         self.assertIsNone(by_pk[c2.pk].last_tx)
 
-    def test_roles_gate_access(self):
+    def test_rep_sees_only_own_customers(self):
+        rep = User.objects.create_user("rep1", password="pw12345")
+        Profile.objects.create(user=rep, role=Profile.ROLE_REP)
+        mine = Customer.objects.create(region=self.r, name="عميل المندوب", rep=rep)
+        self.client.logout(); self.client.login(username="rep1", password="pw12345")
+
+        resp = self.client.get(reverse("customers"))
+        self.assertContains(resp, "عميل المندوب")
+        self.assertNotContains(resp, self.c.name)  # self.c belongs to no one — invisible to the rep
+
+        self.assertEqual(self.client.get(reverse("customer_detail", args=[self.c.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("customer_detail", args=[mine.pk])).status_code, 200)
+
+        self.client.post(reverse("tx_new", args=[mine.pk]),
+                          {"date": date.today(), "quantity": "5", "unit": "طن", "unit_price": "10"})
+        self.assertEqual(mine.transactions.count(), 1)
+        self.assertEqual(self.client.get(reverse("region_new")).status_code, 403)  # reps don't manage regions
+
+    def test_client_sees_only_own_record(self):
+        cu = User.objects.create_user("client1", password="pw12345")
+        Profile.objects.create(user=cu, role=Profile.ROLE_CLIENT)
+        mine = Customer.objects.create(region=self.r, name="عميل شخصي", user=cu)
+        self.client.logout(); self.client.login(username="client1", password="pw12345")
+
+        resp = self.client.get(reverse("dashboard"))  # clients land straight on their own record
+        self.assertContains(resp, "عميل شخصي")
+        self.assertEqual(self.client.get(reverse("customer_detail", args=[self.c.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("region_new")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("customer_new")).status_code, 403)  # clients never add/edit
+        edit_url = reverse("customer_edit", args=[mine.pk])
+        self.assertNotContains(resp, edit_url)  # no edit link shown to a client viewing their own record
         viewer = User.objects.create_user("viewer", password="pw12345")
         Profile.objects.create(user=viewer, role=Profile.ROLE_VIEW)
         editor = User.objects.create_user("editor", password="pw12345")

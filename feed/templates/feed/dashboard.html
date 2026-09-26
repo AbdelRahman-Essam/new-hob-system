@@ -1,5 +1,9 @@
 {% extends "feed/base.html" %}{% load static %}
 {% block content %}
+{% if no_client_link %}
+<div class="hd"><img class="lg" src="{% static 'feed/new_hope_logo.jpg' %}" alt="NEW HOPE LIUHE"><h1>إدارة سحوبات العلف</h1></div>
+<div class="cd"><div class="t">لا يوجد ربط بعد</div><div class="m">لم يتم ربط حسابك بعملاء بعد. تواصل مع الإدارة لربط حسابك ببياناتك.</div></div>
+{% else %}
 <div class="hd"><img class="lg" src="{% static 'feed/new_hope_logo.jpg' %}" alt="NEW HOPE LIUHE">
 <h1>إدارة سحوبات العلف</h1><small>{{ CONTACT_NAME }} • ت / {{ CONTACT_PHONE }}</small></div>
 <div class="grid">
@@ -14,8 +18,9 @@
 {% for x in groups.due %}{% include "feed/_item.html" with c=x.c t=x.t %}{% empty %}<div class="em">لا يوجد</div>{% endfor %}
 <h2>⚫ متأخر ({{ groups.late|length }})</h2>
 {% for x in groups.late %}{% include "feed/_item.html" with c=x.c t=x.t %}{% empty %}<div class="em">لا يوجد</div>{% endfor %}
+{% endif %}
 {% endblock %}
-{% block scripts %}{{ alerts|json_script:"alerts" }}
+{% block scripts %}{% if not no_client_link %}{{ alerts|json_script:"alerts" }}
 <script>
 (function(){
  var a=JSON.parse(document.getElementById("alerts").textContent),b=document.getElementById("nbtn");
@@ -25,4 +30,4 @@
  if(Notification.permission==="granted"){go();if(b)b.remove()}
  if(b)b.onclick=function(){Notification.requestPermission().then(function(p){if(p==="granted"){go();b.remove()}})}
 })();
-</script>{% endblock %}
+</script>{% endif %}{% endblock %}

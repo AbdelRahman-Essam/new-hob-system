@@ -42,6 +42,12 @@ class Customer(models.Model):
     farm_name = models.CharField("اسم المزرعة / الشركة", max_length=150, blank=True)
     address = models.CharField("العنوان", max_length=250, blank=True)
     notes = models.TextField("ملاحظات", blank=True)
+    rep = models.ForeignKey(django_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name="clients", verbose_name="المندوب المسؤول",
+                             limit_choices_to={"profile__role": "rep"})
+    user = models.OneToOneField(django_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name="customer_profile", verbose_name="حساب دخول العميل",
+                                 limit_choices_to={"profile__role": "client"})
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -155,9 +161,22 @@ class AppSettings(models.Model):
 
 class Profile(models.Model):
     """Extends the built-in User with a permission level for this app specifically
-    (separate from Django's own is_staff/is_superuser, which still control /admin/ access)."""
-    ROLE_VIEW, ROLE_EDIT, ROLE_ADMIN = "view", "edit", "admin"
-    ROLES = [(ROLE_VIEW, "مشاهدة فقط"), (ROLE_EDIT, "تعديل (إضافة وتعديل البيانات)"), (ROLE_ADMIN, "مدير كامل الصلاحيات")]
+    (separate from Django's own is_staff/is_superuser, which still control /admin/ access).
+
+    - view/edit/admin: internal staff, see every customer (view = read-only, edit = full
+      data entry, admin = also settings/users/backup).
+    - rep (مندوب): a field representative — sees and manages only the customers assigned
+      to them (Customer.rep).
+    - client (عميل): a customer's own login — sees only their own record (Customer.user).
+    """
+    ROLE_VIEW, ROLE_EDIT, ROLE_REP, ROLE_CLIENT, ROLE_ADMIN = "view", "edit", "rep", "client", "admin"
+    ROLES = [
+        (ROLE_VIEW, "مشاهدة فقط (كل البيانات)"),
+        (ROLE_EDIT, "تعديل (كل البيانات)"),
+        (ROLE_REP, "مندوب (عملاؤه فقط)"),
+        (ROLE_CLIENT, "عميل (بياناته فقط)"),
+        (ROLE_ADMIN, "مدير كامل الصلاحيات"),
+    ]
 
     user = models.OneToOneField(django_settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
     role = models.CharField("الصلاحية", max_length=10, choices=ROLES, default=ROLE_VIEW)
@@ -167,7 +186,7 @@ class Profile(models.Model):
 
     @property
     def can_edit(self):
-        return self.role in (self.ROLE_EDIT, self.ROLE_ADMIN)
+        return self.role in (self.ROLE_EDIT, self.ROLE_REP, self.ROLE_ADMIN)
 
     @property
     def can_admin(self):
@@ -175,11 +194,22 @@ class Profile(models.Model):
 
 
 def get_role(user):
-    """Returns 'view' | 'edit' | 'admin' for any logged-in user, creating a Profile
-    (defaulting to view-only) the first time an older account is seen."""
+    """Returns 'view' | 'edit' | 'rep' | 'client' | 'admin' for any logged-in user, creating
+    a Profile (defaulting to view-only) the first time an older account is seen."""
     if not user.is_authenticated:
         return None
     if user.is_superuser:
         return Profile.ROLE_ADMIN
     profile, _ = Profile.objects.get_or_create(user=user, defaults={"role": Profile.ROLE_VIEW})
     return profile.role
+
+
+def visible_customers(user):
+    """The Customer queryset this user is allowed to see anywhere in the app: everything for
+    internal staff, only their assigned customers for a rep, only their own record for a client."""
+    role = get_role(user)
+    if role == Profile.ROLE_CLIENT:
+        return Customer.objects.filter(user=user)
+    if role == Profile.ROLE_REP:
+        return Customer.objects.filter(rep=user)
+    return Customer.objects.all()

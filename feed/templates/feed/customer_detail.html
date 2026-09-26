@@ -1,15 +1,15 @@
 {% extends "feed/base.html" %}
-{% block content %}<a class="btn sec full" href="{% url 'customers' %}">→ رجوع</a>
+{% block content %}{% if role != "client" %}<a class="btn sec full" href="{% url 'customers' %}">→ رجوع</a>{% endif %}
 <div class="cd"><div class="t"><span>{{ c.name }}</span></div>
 <div class="m">الشريحة: {{ c.region.name }}<br>المزرعة: {{ c.farm_name|default:"-" }}<br>الهاتف: {{ c.phone|default:"-" }}<br>العنوان: {{ c.address|default:"-" }}<br>ملاحظات: {{ c.notes|default:"-" }}<br>أُضيف: {{ c.created_at|date:"d/m/Y" }}</div>
 <div class="row">{% if c.phone %}<a class="btn or" href="tel:{{ c.phone }}">📞 اتصال</a><a class="btn" target="_blank" rel="noopener" href="{{ c.whatsapp_url }}">WhatsApp</a>{% endif %}
-{% if can_edit %}<a class="btn sec" href="{% url 'customer_edit' c.pk %}">تعديل</a><a class="btn rd" href="{% url 'delete' 'customer' c.pk %}">حذف</a>{% endif %}</div></div>
+{% if can_edit_own %}<a class="btn sec" href="{% url 'customer_edit' c.pk %}">تعديل</a><a class="btn rd" href="{% url 'delete' 'customer' c.pk %}">حذف</a>{% endif %}</div></div>
 {% if t %}<h2>آخر نقلة</h2>{% include "feed/_item.html" with c=c t=t hide_actions=True %}{% endif %}
-{% if can_edit %}<a class="btn full" href="{% url 'tx_new' c.pk %}">＋ إضافة نقلة</a>{% endif %}
+{% if can_edit_own %}<a class="btn full" href="{% url 'tx_new' c.pk %}">＋ إضافة نقلة</a>{% endif %}
 <h2>سجل السحوبات ({{ history|length }})</h2>
 {% for x in history %}<div class="cd {{ x.status }}"><div class="t"><span>{{ x.date|date:"d/m/Y" }}{% if x.time %} {{ x.time|time:"H:i" }}{% endif %}</span><span class="tag {{ x.status }}">{{ x.status_label }}</span></div>
 <div class="m">{{ x.quantity|floatformat:"-2" }} {{ x.unit }} {{ x.feed_type }} × {{ x.unit_price|floatformat:"-2" }} = <b>{{ x.total_price|floatformat:"-2" }}</b><br>
 موعد الـ40 يومًا: {{ x.due_date|date:"d/m/Y" }} — {{ x.remaining_text }}
 {% if x.vehicle_number %}<br>سيارة: {{ x.vehicle_number }}{% endif %}{% if x.invoice_number %} • إذن: {{ x.invoice_number }}{% endif %}{% if x.notes %}<br>{{ x.notes }}{% endif %}</div>
-{% if can_edit %}<div class="row"><a class="btn sec" href="{% url 'tx_edit' x.pk %}">تعديل</a><a class="btn sec" href="{% url 'delete' 'tx' x.pk %}">حذف</a></div>{% endif %}</div>
+{% if can_edit_own %}<div class="row"><a class="btn sec" href="{% url 'tx_edit' x.pk %}">تعديل</a><a class="btn sec" href="{% url 'delete' 'tx' x.pk %}">حذف</a></div>{% endif %}</div>
 {% empty %}<div class="em">لا توجد نقلات</div>{% endfor %}{% endblock %}

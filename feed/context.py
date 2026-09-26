@@ -11,6 +11,7 @@ def branding(request):
         "CONTACT_NAME": settings.CONTACT_NAME,
         "CONTACT_PHONE": settings.CONTACT_PHONE,
         "role": role,
-        "can_edit": role in ("edit", "admin"),
+        "can_edit": role in ("edit", "admin"),            # regions / administrative structure
+        "can_edit_own": role in ("edit", "rep", "admin"),  # customers & transactions (reps: their own only)
         "can_admin": role == "admin",
     }
