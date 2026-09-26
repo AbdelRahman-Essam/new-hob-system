@@ -1,0 +1,28 @@
+{% extends "feed/base.html" %}{% load static %}
+{% block content %}
+<div class="hd"><img class="lg" src="{% static 'feed/new_hope_logo.jpg' %}" alt="NEW HOPE LIUHE">
+<h1>إدارة سحوبات العلف</h1><small>{{ CONTACT_NAME }} • ت / {{ CONTACT_PHONE }}</small></div>
+<div class="grid">
+<div class="st"><b>{{ n_customers }}</b><span>إجمالي العملاء</span></div>
+<div class="st"><b>{{ n_regions }}</b><span>الشرائح</span></div>
+<div class="st"><b>{{ total_qty|floatformat:"-2" }}</b><span>إجمالي الكمية</span></div>
+<div class="st"><b>{{ total_value|floatformat:"-2" }}</b><span>إجمالي القيمة</span></div></div>
+{% if app.notifications_enabled %}<button class="btn sec full" id="nbtn" type="button">🔔 السماح بإشعارات المتصفح</button>{% endif %}
+<h2>🔔 يحتاج متابعة ({{ groups.soon|length }})</h2>
+{% for x in groups.soon %}{% include "feed/_item.html" with c=x.c t=x.t %}{% empty %}<div class="em">لا يوجد</div>{% endfor %}
+<h2>🔴 مستحق اليوم ({{ groups.due|length }})</h2>
+{% for x in groups.due %}{% include "feed/_item.html" with c=x.c t=x.t %}{% empty %}<div class="em">لا يوجد</div>{% endfor %}
+<h2>⚫ متأخر ({{ groups.late|length }})</h2>
+{% for x in groups.late %}{% include "feed/_item.html" with c=x.c t=x.t %}{% empty %}<div class="em">لا يوجد</div>{% endfor %}
+{% endblock %}
+{% block scripts %}{{ alerts|json_script:"alerts" }}
+<script>
+(function(){
+ var a=JSON.parse(document.getElementById("alerts").textContent),b=document.getElementById("nbtn");
+ if(!("Notification" in window)){if(b)b.remove();return}
+ function go(){var k="nh_"+new Date().toDateString();try{if(localStorage.getItem(k))return;localStorage.setItem(k,1)}catch(e){}
+  a.forEach(function(x){new Notification(x.title,{body:x.body})})}
+ if(Notification.permission==="granted"){go();if(b)b.remove()}
+ if(b)b.onclick=function(){Notification.requestPermission().then(function(p){if(p==="granted"){go();b.remove()}})}
+})();
+</script>{% endblock %}

@@ -1,0 +1,258 @@
+import csv
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.models import User
+from django.core import serializers
+from django.db import transaction
+from django.db.models import Q, Sum
+from django.http import HttpResponse, HttpResponseForbidden
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.dateparse import parse_date
+from .forms import CustomerForm, RegionForm, SettingsForm, TransactionForm, UserForm
+from .models import AppSettings, Customer, FeedTransaction, Region
+
+is_admin = user_passes_test(lambda u: u.is_staff)
+
+
+def _form(request, form_class, title, next_url, instance=None, initial=None, on_save=None):
+    form = form_class(request.POST or None, instance=instance, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        obj = form.save(commit=False)
+        if on_save:
+            on_save(obj)
+        obj.save()
+        messages.success(request, "تم الحفظ")
+        return redirect(next_url)
+    return render(request, "feed/form.html", {"form": form, "title": title, "cancel": next_url})
+
+
+@login_required
+def dashboard(request):
+    cfg = AppSettings.get()
+    groups = {"soon": [], "due": [], "late": []}
+    alerts = []
+    for c in Customer.objects.select_related("region"):
+        t = c.last_tx
+        if not t:
+            continue
+        if t.status in groups:
+            groups[t.status].append({"c": c, "t": t})
+        d, who = t.days_left, c.farm_name or c.name
+        if cfg.notifications_enabled:
+            if d < 0 and cfg.late_daily:
+                alerts.append({"title": "تنبيه: سحب علف متأخر", "body": f"العميل: {who}\nمرّ {-d} يومًا بعد موعد الـ40 يومًا."})
+            elif d == 0:
+                alerts.append({"title": "موعد سحب علف مستحق اليوم", "body": f"العميل: {who}"})
+            elif d in cfg.days_list:
+                alerts.append({"title": "موعد سحب علف قريب", "body": f"العميل: {who}\nمتبقي {d} يوم على مرور 40 يومًا من آخر نقلة."})
+    for g in groups.values():
+        g.sort(key=lambda x: x["t"].days_left)
+    agg = FeedTransaction.objects.aggregate(q=Sum("quantity"), v=Sum("total_price"))
+    return render(request, "feed/dashboard.html", {
+        "groups": groups, "alerts": alerts, "n_customers": Customer.objects.count(), "n_regions": Region.objects.count(),
+        "total_qty": agg["q"] or 0, "total_value": agg["v"] or 0})
+
+
+@login_required
+def regions(request):
+    rows = []
+    for r in Region.objects.all():
+        cs = list(r.customers.all())
+        qty = FeedTransaction.objects.filter(customer__region=r).aggregate(q=Sum("quantity"))["q"] or 0
+        need = sum(1 for c in cs if c.last_tx and c.last_tx.status != "ok")
+        rows.append({"r": r, "n": len(cs), "qty": qty, "need": need})
+    return render(request, "feed/regions.html", {"rows": rows})
+
+
+@login_required
+def region_form(request, pk=None):
+    obj = get_object_or_404(Region, pk=pk) if pk else None
+    return _form(request, RegionForm, "تعديل الشريحة" if obj else "شريحة جديدة", reverse("regions"), instance=obj)
+
+
+FILTERS = [("all", "الكل"), ("soon", "مستحق قريبًا"), ("due", "مستحق اليوم"), ("late", "متأخر"), ("none", "لا توجد نقلة حديثة")]
+
+
+@login_required
+def customers(request):
+    q, f, r = request.GET.get("q", "").strip(), request.GET.get("f", "all"), request.GET.get("r", "")
+    qs = Customer.objects.select_related("region")
+    if r.isdigit():
+        qs = qs.filter(region_id=r)
+    if q:
+        qs = qs.filter(Q(name__icontains=q) | Q(farm_name__icontains=q) | Q(phone__icontains=q) | Q(region__name__icontains=q))
+    rows = []
+    for c in qs:
+        t = c.last_tx
+        if f == "none" and t and t.days_left >= -DUE_GRACE:
+            continue
+        if f in ("soon", "due", "late") and not (t and t.status == f):
+            continue
+        rows.append({"c": c, "t": t})
+    rows.sort(key=lambda x: (x["t"] is None, x["t"].days_left if x["t"] else 0))
+    region = Region.objects.filter(pk=r).first() if r.isdigit() else None
+    return render(request, "feed/customers.html", {"rows": rows, "q": q, "f": f, "filters": FILTERS, "region": region})
+
+
+DUE_GRACE = 40  # "no recent delivery" = overdue by more than 40 days, or never delivered
+
+
+@login_required
+def customer_form(request, pk=None):
+    obj = get_object_or_404(Customer, pk=pk) if pk else None
+    if not obj and not Region.objects.exists():
+        messages.error(request, "أضف شريحة أولًا")
+        return redirect("region_new")
+    initial = {"region": request.GET.get("r")} if request.GET.get("r") else None
+    nxt = reverse("customer_detail", args=[pk]) if pk else reverse("customers")
+    return _form(request, CustomerForm, "تعديل العميل" if obj else "عميل جديد", nxt, instance=obj, initial=initial)
+
+
+@login_required
+def customer_detail(request, pk):
+    c = get_object_or_404(Customer.objects.select_related("region"), pk=pk)
+    return render(request, "feed/customer_detail.html", {"c": c, "history": list(c.transactions.all()), "t": c.last_tx})
+
+
+@login_required
+def tx_form(request, cpk=None, pk=None):
+    obj = get_object_or_404(FeedTransaction, pk=pk) if pk else None
+    customer = obj.customer if obj else get_object_or_404(Customer, pk=cpk)
+
+    def attach(o):
+        o.customer = customer
+    return _form(request, TransactionForm, ("تعديل النقلة" if obj else "إضافة نقلة") + " — " + customer.name,
+                 reverse("customer_detail", args=[customer.pk]), instance=obj, on_save=attach)
+
+
+@login_required
+def delete(request, kind, pk):
+    model = {"region": Region, "customer": Customer, "tx": FeedTransaction}.get(kind)
+    if not model:
+        return redirect("dashboard")
+    obj = get_object_or_404(model, pk=pk)
+    back = reverse({"region": "regions", "customer": "customers"}[kind]) if kind != "tx" else reverse("customer_detail", args=[obj.customer_id])
+    if request.method == "POST":
+        obj.delete()
+        messages.success(request, "تم الحذف")
+        return redirect(back)
+    warn = {"region": "سيتم حذف كل عملاء الشريحة وسجل سحوباتهم أيضًا.", "customer": "سيتم حذف كل سجل سحوبات العميل أيضًا."}.get(kind, "")
+    return render(request, "feed/confirm.html", {"obj": obj, "warn": warn, "cancel": back})
+
+
+@login_required
+def report(request):
+    g = request.GET
+    qs = FeedTransaction.objects.select_related("customer__region").order_by("-date")
+    if g.get("r", "").isdigit():
+        qs = qs.filter(customer__region_id=g["r"])
+    if g.get("c", "").isdigit():
+        qs = qs.filter(customer_id=g["c"])
+    a, b = parse_date(g.get("a", "") or ""), parse_date(g.get("b", "") or "")
+    if a:
+        qs = qs.filter(date__gte=a)
+    if b:
+        qs = qs.filter(date__lte=b)
+    rows = list(qs)
+    if g.get("csv"):
+        resp = HttpResponse(content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = 'attachment; filename="feed_report.csv"'
+        resp.write("\ufeff")
+        w = csv.writer(resp)
+        w.writerow(["الشريحة", "العميل", "المزرعة", "الهاتف", "تاريخ السحب", "النوع", "الكمية", "الوحدة", "السعر", "الإجمالي", "موعد 40 يوم"])
+        for t in rows:
+            c = t.customer
+            w.writerow([c.region.name, c.name, c.farm_name, c.phone, t.date, t.feed_type, t.quantity, t.unit, t.unit_price, t.total_price, t.due_date])
+        return resp
+    by = {}
+    for t in rows:
+        x = by.setdefault(t.customer.region.name, [0, 0, 0])
+        x[0] += 1; x[1] += t.quantity; x[2] += t.total_price
+    due = late = 0
+    for c in Customer.objects.all():
+        t = c.last_tx
+        due += bool(t and t.status == "due"); late += bool(t and t.status == "late")
+    return render(request, "feed/report.html", {
+        "rows": rows, "by_region": by.items(), "n": len(rows), "qty": sum(t.quantity for t in rows),
+        "value": sum(t.total_price for t in rows), "due": due, "late": late, "g": g,
+        "regions": Region.objects.all(), "customers": Customer.objects.filter(region_id=g["r"]) if g.get("r", "").isdigit() else Customer.objects.all(),
+        "today": timezone.localdate()})
+
+
+@login_required
+@is_admin
+def settings_view(request):
+    form = SettingsForm(request.POST or None, instance=AppSettings.get())
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "تم حفظ الإعدادات")
+        return redirect("settings")
+    return render(request, "feed/settings.html", {"form": form})
+
+
+@login_required
+@is_admin
+def backup(request):
+    data = serializers.serialize("json", [*Region.objects.all(), *Customer.objects.all(), *FeedTransaction.objects.all(), *AppSettings.objects.all()])
+    resp = HttpResponse(data, content_type="application/json; charset=utf-8")
+    resp["Content-Disposition"] = f'attachment; filename="newhope_backup_{timezone.localdate()}.json"'
+    return resp
+
+
+@login_required
+@is_admin
+def restore(request):
+    f = request.FILES.get("file")
+    if request.method == "POST" and f:
+        try:
+            objs = list(serializers.deserialize("json", f.read().decode("utf-8-sig")))
+            with transaction.atomic():
+                for m in (FeedTransaction, Customer, Region, AppSettings):
+                    m.objects.all().delete()
+                for o in objs:
+                    o.save()
+            messages.success(request, "تمت استعادة النسخة الاحتياطية")
+        except Exception:
+            messages.error(request, "ملف النسخة الاحتياطية غير صالح، لم يتغير شيء")
+    return redirect("settings")
+
+
+@login_required
+@is_admin
+def users_view(request):
+    return render(request, "feed/users.html", {"rows": User.objects.all().order_by("username")})
+
+
+@login_required
+@is_admin
+def user_form(request, pk=None):
+    obj = get_object_or_404(User, pk=pk) if pk else None
+    form = UserForm(request.POST or None, instance=obj)
+    if request.method == "POST" and form.is_valid():
+        user = form.save(commit=False)
+        pw = form.cleaned_data.get("password")
+        if pw:
+            user.set_password(pw)
+        elif not obj:
+            messages.error(request, "اكتب كلمة مرور للمستخدم الجديد")
+            return render(request, "feed/form.html", {"form": form, "title": "مستخدم جديد", "cancel": reverse("users")})
+        user.save()
+        messages.success(request, "تم الحفظ")
+        return redirect("users")
+    return render(request, "feed/form.html", {"form": form, "title": "تعديل مستخدم" if obj else "مستخدم جديد", "cancel": reverse("users")})
+
+
+@login_required
+@is_admin
+def user_delete(request, pk):
+    obj = get_object_or_404(User, pk=pk)
+    if obj == request.user:
+        messages.error(request, "لا يمكنك حذف حسابك الحالي")
+        return redirect("users")
+    if request.method == "POST":
+        obj.delete()
+        messages.success(request, "تم الحذف")
+        return redirect("users")
+    return render(request, "feed/confirm.html", {"obj": obj.username, "warn": "سيفقد هذا المستخدم إمكانية الدخول.", "cancel": reverse("users")})

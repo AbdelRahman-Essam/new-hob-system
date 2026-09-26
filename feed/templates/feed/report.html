@@ -1,0 +1,14 @@
+{% extends "feed/base.html" %}{% load static %}
+{% block content %}<div class="hd"><img class="lg" src="{% static 'feed/new_hope_logo.jpg' %}" alt="NEW HOPE LIUHE"><h1>تقرير سحوبات العلف</h1></div>
+<form method="get" class="noprint card">
+<label>الشريحة</label><select name="r"><option value="">الكل</option>{% for r in regions %}<option value="{{ r.pk }}"{% if g.r == r.pk|stringformat:"s" %} selected{% endif %}>{{ r.name }}</option>{% endfor %}</select>
+<label>العميل</label><select name="c"><option value="">الكل</option>{% for c in customers %}<option value="{{ c.pk }}"{% if g.c == c.pk|stringformat:"s" %} selected{% endif %}>{{ c.name }}</option>{% endfor %}</select>
+<label>من</label><input type="date" name="a" value="{{ g.a }}"><label>إلى</label><input type="date" name="b" value="{{ g.b }}">
+<div class="row"><button class="btn" type="submit">عرض</button><a class="btn sec" href="?{{ request.GET.urlencode }}{% if request.GET %}&{% endif %}csv=1">تصدير CSV</a><button class="btn sec" type="button" onclick="print()">طباعة</button></div></form>
+<div class="grid"><div class="st"><b>{{ n }}</b><span>عدد النقلات</span></div><div class="st"><b>{{ qty|floatformat:"-2" }}</b><span>إجمالي الكميات</span></div>
+<div class="st"><b>{{ value|floatformat:"-2" }}</b><span>إجمالي القيمة</span></div><div class="st"><b>{{ due }} / {{ late }}</b><span>مستحق / متأخر</span></div></div>
+<div class="tb"><table><tr><th>الشريحة</th><th>نقلات</th><th>كمية</th><th>قيمة</th></tr>
+{% for name,x in by_region %}<tr><td>{{ name }}</td><td>{{ x.0 }}</td><td>{{ x.1|floatformat:"-2" }}</td><td>{{ x.2|floatformat:"-2" }}</td></tr>{% endfor %}</table></div>
+<div class="tb"><table><tr><th>التاريخ</th><th>العميل</th><th>الكمية</th><th>الإجمالي</th><th>موعد 40</th></tr>
+{% for t in rows %}<tr><td>{{ t.date|date:"d/m/Y" }}</td><td>{{ t.customer.name }}</td><td>{{ t.quantity|floatformat:"-2" }} {{ t.unit }}</td><td>{{ t.total_price|floatformat:"-2" }}</td><td>{{ t.due_date|date:"d/m/Y" }}</td></tr>{% endfor %}</table></div>
+<div class="ft">{{ CONTACT_NAME }}<br>ت / {{ CONTACT_PHONE }}</div>{% endblock %}

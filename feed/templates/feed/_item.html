@@ -1,0 +1,10 @@
+{% load static %}<div class="cd {{ t.status }}">
+<div class="t"><span>{{ c.name }}</span><span class="tag {{ t.status }}">{{ t.remaining_text }}</span></div>
+<div class="m">{{ c.region.name }}{% if c.farm_name %} • {{ c.farm_name }}{% endif %}<br>
+آخر نقلة: {{ t.date|date:"d/m/Y" }} — {{ t.quantity|floatformat:"-2" }} {{ t.unit }} {{ t.feed_type }}<br>
+السعر: {{ t.unit_price|floatformat:"-2" }} • الإجمالي: {{ t.total_price|floatformat:"-2" }}<br>
+موعد الـ40 يومًا: <b>{{ t.due_date|date:"d/m/Y" }}</b></div>
+{% if not hide_actions %}<div class="row">
+{% if c.phone %}<a class="btn or" href="tel:{{ c.phone }}">📞 اتصال</a>{% endif %}
+<a class="btn sec" href="{% url 'customer_detail' c.pk %}">تفاصيل</a></div>{% endif %}
+</div>

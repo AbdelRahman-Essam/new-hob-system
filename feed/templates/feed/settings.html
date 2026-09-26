@@ -1,0 +1,12 @@
+{% extends "feed/base.html" %}
+{% block content %}<h2>الإعدادات</h2>
+<form method="post" class="card">{% csrf_token %}{{ form.non_field_errors }}
+{% for f in form %}<label class="chk" for="{{ f.id_for_label }}">{{ f }} {{ f.label }}</label>{% for e in f.errors %}<div class="err">{{ e }}</div>{% endfor %}{% endfor %}
+<button class="btn full" type="submit">حفظ الإعدادات</button></form>
+<div class="cd"><div class="t">المستخدمون</div><div class="m">إدارة حسابات الدخول (عمال/عملاء) وصلاحياتهم.</div>
+<div class="row"><a class="btn" href="{% url 'users' %}">إدارة المستخدمين</a></div></div>
+<div class="cd"><div class="t">النسخ الاحتياطي</div><div class="m">حمّل نسخة JSON بانتظام واحفظها خارج الجهاز.</div>
+<div class="row"><a class="btn" href="{% url 'backup' %}">تحميل نسخة احتياطية</a></div>
+<form method="post" action="{% url 'restore' %}" enctype="multipart/form-data" onsubmit="return confirm('سيتم استبدال كل البيانات الحالية. متابعة؟')">{% csrf_token %}
+<label>استعادة من ملف</label><input type="file" name="file" accept=".json" required><button class="btn sec full" style="margin-top:8px">استعادة</button></form></div>
+<div class="cd"><div class="t">حول التطبيق</div><div class="m">{{ APP_NAME_AR }} — {{ APP_NAME_EN }}<br>{{ CONTACT_NAME }}<br>ت / {{ CONTACT_PHONE }}</div></div>{% endblock %}

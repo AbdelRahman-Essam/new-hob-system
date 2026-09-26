@@ -1,0 +1,10 @@
+{% extends "feed/base.html" %}
+{% block content %}<h2>العملاء{% if region %} — {{ region.name }}{% endif %}</h2>
+<form method="get"><input name="q" value="{{ q }}" placeholder="بحث بالاسم أو الهاتف أو المزرعة أو الشريحة">
+{% if region %}<input type="hidden" name="r" value="{{ region.pk }}">{% endif %}<input type="hidden" name="f" value="{{ f }}"></form>
+<div class="chips">{% for k,l in filters %}<a class="chip {% if f == k %}on{% endif %}" href="?f={{ k }}{% if region %}&r={{ region.pk }}{% endif %}{% if q %}&q={{ q|urlencode }}{% endif %}">{{ l }}</a>{% endfor %}</div>
+{% for x in rows %}{% if x.t %}{% include "feed/_item.html" with c=x.c t=x.t %}{% else %}
+<div class="cd"><div class="t"><span>{{ x.c.name }}</span></div><div class="m">{{ x.c.region.name }} • لا توجد نقلات</div>
+<div class="row"><a class="btn sec" href="{% url 'customer_detail' x.c.pk %}">تفاصيل</a><a class="btn" href="{% url 'tx_new' x.c.pk %}">＋ نقلة</a></div></div>{% endif %}
+{% empty %}<div class="em">لا يوجد عملاء</div>{% endfor %}
+<a class="fab" href="{% url 'customer_new' %}{% if region %}?r={{ region.pk }}{% endif %}">＋ عميل</a>{% endblock %}

@@ -1,0 +1,4 @@
+{% extends "feed/base.html" %}
+{% block content %}<h2>تأكيد الحذف</h2>
+<div class="cd due"><div class="t">هل تريد حذف: {{ obj }}؟</div><div class="m">{{ warn }} لا يمكن التراجع.</div>
+<form method="post" class="row">{% csrf_token %}<button class="btn rd" type="submit">نعم، احذف</button><a class="btn sec" href="{{ cancel }}">إلغاء</a></form></div>{% endblock %}

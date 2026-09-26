@@ -1,0 +1,9 @@
+{% extends "feed/base.html" %}
+{% block content %}<h2>الشرائح / المناطق</h2>
+{% for x in rows %}<div class="cd"><div class="t"><span>{{ x.r.name }}</span><span class="tag {% if x.need %}soon{% endif %}">{{ x.need }} يحتاج متابعة</span></div>
+<div class="m">{{ x.n }} عميل • إجمالي الكمية {{ x.qty|floatformat:"-2" }}</div>
+<div class="row"><a class="btn" href="{% url 'customers' %}?r={{ x.r.pk }}">العملاء</a>
+<a class="btn sec" href="{% url 'region_edit' x.r.pk %}">تعديل</a>
+<a class="btn sec" href="{% url 'delete' 'region' x.r.pk %}">حذف</a></div></div>
+{% empty %}<div class="em">لا توجد شرائح. أضف أول شريحة (مثال: الطريق الدولي الساحلي)</div>{% endfor %}
+<a class="fab" href="{% url 'region_new' %}">＋ شريحة</a>{% endblock %}

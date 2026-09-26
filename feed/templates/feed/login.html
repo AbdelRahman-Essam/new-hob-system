@@ -1,0 +1,11 @@
+{% load static %}<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>دخول — {{ APP_NAME_AR }}</title>
+<link rel="stylesheet" href="{% static 'feed/style.css' %}"></head><body>
+<div class="wrap"><div class="card">
+<div class="hd" style="padding:0 0 10px"><img class="lg" src="{% static 'feed/new_hope_logo.jpg' %}"><h1>{{ APP_NAME_AR }}</h1></div>
+{% if form.errors %}<div class="msg error">اسم المستخدم أو كلمة المرور غير صحيحة</div>{% endif %}
+<form method="post">{% csrf_token %}
+<label for="{{ form.username.id_for_label }}">اسم المستخدم</label>{{ form.username }}
+<label for="{{ form.password.id_for_label }}">كلمة المرور</label>{{ form.password }}
+<button class="btn full" type="submit" style="margin-top:14px">دخول</button></form>
+</div></div></body></html>
