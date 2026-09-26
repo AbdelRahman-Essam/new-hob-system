@@ -33,4 +33,19 @@ nav a i{display:block;font-style:normal;font-size:20px}nav a.on{color:var(--g);f
 .ft{text-align:center;color:var(--mu);font-size:13px;margin:22px 0}
 .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
 .topbar{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--mu);padding:4px 2px}
+@media (hover:hover){.btn:hover{filter:brightness(.92)}.chip:hover{border-color:var(--g)}nav a:hover{color:var(--tx)}}
+
+/* Desktop: the bottom tab bar becomes a side rail instead of a squeezed 680px mobile column */
+@media (min-width:880px){
+  body{padding-bottom:0}
+  nav{position:fixed;inset-inline-start:0;top:0;bottom:0;inset-inline-end:auto;width:230px;flex-direction:column;
+      border-top:0;border-inline-end:1px solid var(--bd);align-items:stretch;justify-content:flex-start;padding-top:18px;gap:2px}
+  nav a{flex:none;display:flex;align-items:center;gap:12px;text-align:start;padding:12px 22px;font-size:14px;border-radius:24px 0 0 24px}
+  nav a.on{background:var(--bg)}
+  nav a i{font-size:19px}
+  #app{max-width:920px;margin-inline-start:230px;margin-inline-end:auto;padding:28px 36px}
+  .fab{inset-inline-start:254px}
+  .grid{grid-template-columns:repeat(4,1fr)}
+}
+
 @media print{nav,.fab,.noprint,.row{display:none!important}body{background:#fff;color:#000}}
