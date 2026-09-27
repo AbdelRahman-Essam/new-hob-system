@@ -4,7 +4,6 @@
 واختر المندوب المسؤول و/أو حساب دخول العميل من هناك.</div></div>
 {% for u in rows %}<div class="cd"><div class="t"><span>{{ u.username }}
 {% if u.is_superuser %}<span class="tag due">مدير عام (Superuser)</span>
-{% elif not u.profile %}<span class="tag late">بدون صلاحية محددة (ستُعامل كـ"مشاهدة فقط" عند أول دخول)</span>
 {% elif u.profile.role == 'admin' %}<span class="tag due">مدير كامل الصلاحيات</span>
 {% elif u.profile.role == 'edit' %}<span class="tag soon">تعديل</span>
 {% elif u.profile.role == 'rep' %}<span class="tag soon">مندوب</span>

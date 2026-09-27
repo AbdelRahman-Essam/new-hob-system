@@ -8,21 +8,3 @@ staticfiles/
 backups/
 *.sqlite3-*
 .DS_Store
-
-# Django runtime files
-db.sqlite3
-db.sqlite3-*
-__pycache__/
-*.py[cod]
-
-# Collected static files
-staticfiles/
-
-# Django runtime files
-db.sqlite3
-db.sqlite3-*
-__pycache__/
-*.py[cod]
-
-# Collected static files
-staticfiles/
