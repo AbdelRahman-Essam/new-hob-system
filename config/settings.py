@@ -86,3 +86,12 @@ APP_NAME_AR = "إدارة سحوبات علف نيوهوب"
 APP_NAME_EN = "New Hope Feed Manager"
 CONTACT_NAME = "م / أحمد غنيم"
 CONTACT_PHONE = "01556665054"
+
+# Send unhandled 500 tracebacks to console/journal even with DEBUG=0
+# (Django's default only mails them to ADMINS, which isn't configured here).
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {"django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False}},
+}
