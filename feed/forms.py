@@ -43,7 +43,12 @@ class CustomerForm(forms.ModelForm):
             self.fields["rep"].required = False
             self.fields["rep"].queryset = User.objects.filter(profile__role=Profile.ROLE_REP)
             self.fields["user"].required = False
-            linked_elsewhere = Customer.objects.exclude(pk=self.instance.pk if self.instance else None).values_list("user_id", flat=True)
+            # NOTE: must exclude NULL user_id rows before using this in a NOT IN — SQL's
+            # "NOT IN (list containing NULL)" matches zero rows, which silently emptied this
+            # dropdown for every customer (since most customers have no linked client account,
+            # i.e. user_id IS NULL, and that NULL poisoned the whole exclusion list).
+            linked_elsewhere = (Customer.objects.exclude(pk=self.instance.pk if self.instance else None)
+                                 .exclude(user__isnull=True).values_list("user_id", flat=True))
             self.fields["user"].queryset = User.objects.filter(profile__role=Profile.ROLE_CLIENT).exclude(pk__in=linked_elsewhere)
 
 

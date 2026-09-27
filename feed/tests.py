@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from .forms import CustomerForm
 from .models import Customer, FeedTransaction, Profile, Region, get_role
 
 
@@ -91,6 +92,8 @@ class FeedTests(TestCase):
         self.assertEqual(self.client.get(reverse("customer_new")).status_code, 403)  # clients never add/edit
         edit_url = reverse("customer_edit", args=[mine.pk])
         self.assertNotContains(resp, edit_url)  # no edit link shown to a client viewing their own record
+
+    def test_roles_gate_access(self):
         viewer = User.objects.create_user("viewer", password="pw12345")
         Profile.objects.create(user=viewer, role=Profile.ROLE_VIEW)
         editor = User.objects.create_user("editor", password="pw12345")
@@ -108,3 +111,15 @@ class FeedTests(TestCase):
         self.client.logout(); self.client.login(username="editor", password="pw12345")
         self.assertEqual(self.client.get(reverse("region_new")).status_code, 200)          # can edit
         self.assertEqual(self.client.get(reverse("settings")).status_code, 403)            # still can't admin
+
+    def test_client_login_dropdown_not_emptied_by_sql_null_gotcha(self):
+        # Regression test: CustomerForm's "user" (client login) field queryset used to build its
+        # "already linked elsewhere" exclusion list from ALL other customers' user_id, including
+        # NULLs. `NOT IN (list containing NULL)` matches zero rows in SQL, so as soon as one
+        # customer had no linked client account (the normal case), the dropdown went empty for
+        # every customer, always.
+        Customer.objects.create(region=self.r, name="عميل بلا حساب دخول")  # user=None, the normal case
+        available_client = User.objects.create_user("client2", password="pw12345")
+        Profile.objects.create(user=available_client, role=Profile.ROLE_CLIENT)
+        form = CustomerForm(allow_assign=True)
+        self.assertIn(available_client, form.fields["user"].queryset)
