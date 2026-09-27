@@ -63,7 +63,7 @@ class FeedTests(TestCase):
 
     def test_rep_sees_only_own_customers(self):
         rep = User.objects.create_user("rep1", password="pw12345")
-        Profile.objects.create(user=rep, role=Profile.ROLE_REP)
+        Profile.objects.update_or_create(user=rep, defaults={"role": Profile.ROLE_REP})
         mine = Customer.objects.create(region=self.r, name="عميل المندوب", rep=rep)
         self.client.logout(); self.client.login(username="rep1", password="pw12345")
 
@@ -81,7 +81,7 @@ class FeedTests(TestCase):
 
     def test_client_sees_only_own_record(self):
         cu = User.objects.create_user("client1", password="pw12345")
-        Profile.objects.create(user=cu, role=Profile.ROLE_CLIENT)
+        Profile.objects.update_or_create(user=cu, defaults={"role": Profile.ROLE_CLIENT})
         mine = Customer.objects.create(region=self.r, name="عميل شخصي", user=cu)
         self.client.logout(); self.client.login(username="client1", password="pw12345")
 
@@ -95,9 +95,9 @@ class FeedTests(TestCase):
 
     def test_roles_gate_access(self):
         viewer = User.objects.create_user("viewer", password="pw12345")
-        Profile.objects.create(user=viewer, role=Profile.ROLE_VIEW)
+        Profile.objects.update_or_create(user=viewer, defaults={"role": Profile.ROLE_VIEW})
         editor = User.objects.create_user("editor", password="pw12345")
-        Profile.objects.create(user=editor, role=Profile.ROLE_EDIT)
+        Profile.objects.update_or_create(user=editor, defaults={"role": Profile.ROLE_EDIT})
 
         self.assertEqual(get_role(viewer), "view")
         self.assertEqual(get_role(editor), "edit")
@@ -120,6 +120,6 @@ class FeedTests(TestCase):
         # every customer, always.
         Customer.objects.create(region=self.r, name="عميل بلا حساب دخول")  # user=None, the normal case
         available_client = User.objects.create_user("client2", password="pw12345")
-        Profile.objects.create(user=available_client, role=Profile.ROLE_CLIENT)
+        Profile.objects.update_or_create(user=available_client, defaults={"role": Profile.ROLE_CLIENT})
         form = CustomerForm(allow_assign=True)
         self.assertIn(available_client, form.fields["user"].queryset)
